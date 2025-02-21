@@ -1,6 +1,6 @@
 import { api, APIError } from "encore.dev/api";
-import { UserService } from "./user.service";
-import { CreateAccountDto, UserResponse } from "./userInterface";
+import { UserService } from "./auth.service";
+import { CreateAccountDto, UserResponse } from "./Interface";
 
 export const create = api(
     { expose: true, method: "POST", path: "/account" },

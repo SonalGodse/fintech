@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { CreateAccountDto } from "./userInterface";
+import { CreateAccountDto } from "./Interface";
 import { APIError } from "encore.dev/api";
 import axios from "axios";
 
@@ -47,17 +47,44 @@ export const UserService = {
         if (authType === "CREDENTIALS") {
             const account = await prisma.account.findUnique({
                 where: { username },
-                select: { id: true, username: true, password: true },
+                select: { id: true, username: true, password: true, wrong_attempt: true, locked: true },
             });
     
             if (!account || !account.password) {
                 return { success: false, accessToken: "", refreshToken: "" };
             }
     
-            const isPasswordValid = await bcrypt.compare(password, account.password);
-            if (!isPasswordValid) {
-                return { success: false, accessToken: "", refreshToken: "" };
+            if (account.locked) {
+                throw APIError.permissionDenied("Your account is locked due to multiple failed login attempts.");
             }
+    
+            const isPasswordValid = await bcrypt.compare(password, account.password);
+            
+            if (!isPasswordValid) {
+                const updatedAttempts = (account.wrong_attempt || 0) + 1;
+                const isLocked = updatedAttempts >= 3;
+    
+                await prisma.account.update({
+                    where: { username },
+                    data: {
+                        wrong_attempt: updatedAttempts,
+                        locked: isLocked,
+                    },
+                });
+    
+                throw APIError.permissionDenied(
+                    isLocked ? "Your account is locked due to multiple failed login attempts." 
+                             : "Invalid credentials"
+                );
+            }
+    
+            await prisma.account.update({
+                where: { username },
+                data: {
+                    wrong_attempt: 0,
+                    last_login: Math.floor(Date.now() / 1000),
+                },
+            });
     
             const accessToken = jwt.sign({ id: account.id, username: account.username }, SECRET_KEY, {
                 expiresIn: "15m",
@@ -68,7 +95,7 @@ export const UserService = {
         }
     
         return { success: false, accessToken: "", refreshToken: "" };
-    },
+    },    
 
     async refreshToken(refreshToken: string) {
         try {
