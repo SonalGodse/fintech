@@ -33,37 +33,41 @@ export const UserService = {
         };
     },
 
-    async login(username: string, password: string, recaptchaToken: string) {
+    async login(username: string, password: string, recaptchaToken: string, authType: string) {
         if (!recaptchaToken) {
             throw APIError.permissionDenied("Captcha token is required");
         }
-
+    
         try {
             await verifyRecaptcha(recaptchaToken);
         } catch (error) {
             throw APIError.permissionDenied("Invalid captcha");
         }
-
-        const account = await prisma.account.findUnique({
-            where: { username },
-            select: { id: true, username: true, password: true },
-        });
-
-        if (!account || !account.password) {
-            throw APIError.permissionDenied("Invalid credentials");
+    
+        if (authType === "CREDENTIALS") {
+            const account = await prisma.account.findUnique({
+                where: { username },
+                select: { id: true, username: true, password: true },
+            });
+    
+            if (!account || !account.password) {
+                return { success: false, accessToken: "", refreshToken: "" };
+            }
+    
+            const isPasswordValid = await bcrypt.compare(password, account.password);
+            if (!isPasswordValid) {
+                return { success: false, accessToken: "", refreshToken: "" };
+            }
+    
+            const accessToken = jwt.sign({ id: account.id, username: account.username }, SECRET_KEY, {
+                expiresIn: "15m",
+            });
+            const refreshToken = jwt.sign({ id: account.id }, SECRET_KEY, { expiresIn: "7d" });
+    
+            return { success: true, accessToken, refreshToken };
         }
-
-        const isPasswordValid = await bcrypt.compare(password, account.password);
-        if (!isPasswordValid) {
-            throw APIError.permissionDenied("Invalid credentials");
-        }
-
-        const accessToken = jwt.sign({ id: account.id, username: account.username }, SECRET_KEY, {
-            expiresIn: "15m",
-        });
-        const refreshToken = jwt.sign({ id: account.id }, SECRET_KEY, { expiresIn: "7d" });
-
-        return { success: true, accessToken, refreshToken };
+    
+        return { success: false, accessToken: "", refreshToken: "" };
     },
 
     async refreshToken(refreshToken: string) {
