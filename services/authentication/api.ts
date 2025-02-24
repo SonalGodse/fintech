@@ -18,21 +18,73 @@ export const create = api(
     }
 );
 
+// export const login = api(
+//     { expose: true, method: "POST", path: "/auth/login" },
+//     async (data: { username: string; password: string; recaptchaToken?: string; authType?: string;}) => {
+//         try {
+//             if (data.authType ==="MPIN" && !data.recaptchaToken) {
+//                 throw APIError.permissionDenied("Captcha token is required");
+//             }
+
+//             const { success, accessToken, refreshToken } = await UserService.login(
+//                 data.username,
+//                 data.password,
+//                 data.recaptchaToken || '',
+//                 data.authType || 'CREDENTIALS'
+//             );
+            
+
+//             if (!success) {
+//                 throw APIError.permissionDenied("Invalid credentials");
+//             }
+
+//             return { accessToken, refreshToken };
+//         } catch (error) {
+//             throw APIError.aborted(error?.toString() || "Login failed");
+//         }
+//     }
+// );
+
+export const refreshToken = api(
+    { expose: true, method: "POST", path: "/auth/refresh" },
+    async (data: { refreshToken: string }) => {
+        try {
+            const { accessToken, newRefreshToken } = await UserService.refreshToken(data.refreshToken);
+
+            return { accessToken, refreshToken: newRefreshToken };
+        } catch (error) {
+            throw APIError.permissionDenied("Invalid refresh token");
+        }
+    }
+);
+
 export const login = api(
     { expose: true, method: "POST", path: "/auth/login" },
-    async (data: { username: string; password: string; recaptchaToken?: string; authType?: string;}) => {
+    async (data: { 
+        username: string; 
+        password?: string; 
+        recaptchaToken?: string; 
+        authType?: string; 
+        mpin?: number; 
+        deviceId?: string; 
+        deviceType: string; 
+        userId?: number 
+    }) => {
         try {
-            if (data.authType ==="MPIN" && !data.recaptchaToken) {
+            if (data.authType === "CREDENTIALS" && !data.recaptchaToken) {
                 throw APIError.permissionDenied("Captcha token is required");
             }
 
             const { success, accessToken, refreshToken } = await UserService.login(
                 data.username,
-                data.password,
-                data.recaptchaToken || '',
-                data.authType || 'CREDENTIALS'
+                data.password || "", 
+                data.recaptchaToken || "", 
+                data.authType || "CREDENTIALS",
+                data.mpin || 0,             
+                data.deviceId || "",          
+                data.deviceType,       
+                data.userId                   
             );
-            
 
             if (!success) {
                 throw APIError.permissionDenied("Invalid credentials");
@@ -45,15 +97,14 @@ export const login = api(
     }
 );
 
-export const refreshToken = api(
-    { expose: true, method: "POST", path: "/auth/refresh" },
-    async (data: { refreshToken: string }) => {
+export const saveMpin = api(
+    { expose: true, method: "POST", path: "/auth/save-mpin" },
+    async (data: { mpin: number; deviceId: string; deviceType: string; userId?: number }) => {
         try {
-            const { accessToken, newRefreshToken } = await UserService.refreshToken(data.refreshToken);
-
-            return { accessToken, refreshToken: newRefreshToken };
+            const response = await UserService.saveMpin(data.mpin, data.deviceId, data.deviceType, data.userId);
+            return response;
         } catch (error) {
-            throw APIError.permissionDenied("Invalid refresh token");
+            throw APIError.aborted(error?.toString() || "Failed to save MPIN");
         }
     }
 );
