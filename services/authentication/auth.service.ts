@@ -33,70 +33,6 @@ export const UserService = {
         };
     },
 
-    // async login(username: string, password: string, recaptchaToken: string, authType: string) {
-    //     if (!recaptchaToken) {
-    //         throw APIError.permissionDenied("Captcha token is required");
-    //     }
-    
-    //     try {
-    //         await verifyRecaptcha(recaptchaToken);
-    //     } catch (error) {
-    //         throw APIError.permissionDenied("Invalid captcha");
-    //     }
-    
-    //     if (authType === "CREDENTIALS") {
-    //         const account = await prisma.account.findUnique({
-    //             where: { username },
-    //             select: { id: true, username: true, password: true, wrong_attempt: true, locked: true },
-    //         });
-    
-    //         if (!account || !account.password) {
-    //             return { success: false, accessToken: "", refreshToken: "" };
-    //         }
-    
-    //         if (account.locked) {
-    //             throw APIError.permissionDenied("Your account is locked due to multiple failed login attempts.");
-    //         }
-    
-    //         const isPasswordValid = await bcrypt.compare(password, account.password);
-            
-    //         if (!isPasswordValid) {
-    //             const updatedAttempts = (account.wrong_attempt || 0) + 1;
-    //             const isLocked = updatedAttempts >= 3;
-    
-    //             await prisma.account.update({
-    //                 where: { username },
-    //                 data: {
-    //                     wrong_attempt: updatedAttempts,
-    //                     locked: isLocked,
-    //                 },
-    //             });
-    
-    //             throw APIError.permissionDenied(
-    //                 isLocked ? "Your account is locked due to multiple failed login attempts." 
-    //                          : "Invalid credentials"
-    //             );
-    //         }
-    
-    //         await prisma.account.update({
-    //             where: { username },
-    //             data: {
-    //                 wrong_attempt: 0,
-    //                 last_login: Math.floor(Date.now() / 1000),
-    //             },
-    //         });
-    
-    //         const accessToken = jwt.sign({ id: account.id, username: account.username }, SECRET_KEY, {
-    //             expiresIn: "15m",
-    //         });
-    //         const refreshToken = jwt.sign({ id: account.id }, SECRET_KEY, { expiresIn: "7d" });
-    
-    //         return { success: true, accessToken, refreshToken };
-    //     }
-    
-    //     return { success: false, accessToken: "", refreshToken: "" };
-    // },    
-
     async login(
         username: string,
         password: string,
@@ -232,12 +168,10 @@ export const UserService = {
     },
    
     async saveMpin(mpin: number, deviceId: string, deviceType: string, userId?: number) {
-        // Validate required fields
         if (!mpin || !deviceId || !deviceType || !userId) {
             throw APIError.permissionDenied("MPIN, Device ID, Device Type, and User ID are required.");
         }
    
-        // Find the user's accountQ
         const user = await prisma.users.findUnique({
             where: { id: userId },
             select: { account_id: true },
@@ -247,7 +181,6 @@ export const UserService = {
             throw APIError.notFound("User not found or account not linked.");
         }
    
-        // Update MPIN, deviceId, and deviceType in the account table
         await prisma.account.update({
             where: { id: user.account_id },
             data: {
