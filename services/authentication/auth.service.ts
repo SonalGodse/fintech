@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { CreateAccountDto } from "./Interface";
+import { CreateAccountDto, CreateUserAndAccountRequest, CreateUserAndAccountResponse, UserResponse } from "./Interface";
 import { APIError } from "encore.dev/api";
 import axios from "axios";
 
@@ -9,28 +9,98 @@ const SECRET_KEY = "nK4h9P#mY2x$vL8q5W3jR7tZ9nB2cF5v";
 const prisma = new PrismaClient();
 
 export const UserService = {
-    async createAccount(data: CreateAccountDto) {
-        const hashedPassword = await bcrypt.hash(data.password, 10);
-        console.log(hashedPassword);
+    create:async (data: CreateUserAndAccountRequest): Promise<UserResponse> => {
+        try {
+            // Validate required fields
+            if (!data.firstName?.trim()) {
+                throw APIError.invalidArgument("First name is required");
+            }
+            if (!data.lastName?.trim()) {
+                throw APIError.invalidArgument("Last name is required");
+            }
+            if (!data.email?.trim()) {
+                throw APIError.invalidArgument("Email is required");
+            }
+            if (!data.account?.username?.trim()) {
+                throw APIError.invalidArgument("Username is required");
+            }
+            if (!data.account?.password?.trim()) {
+                throw APIError.invalidArgument("Password is required");
+            }
 
-        const account = await prisma.account.create({
-            data: {
-                username: data.username,
-                password: hashedPassword,
-                active: data.active,
-                wrong_attempt: data.wrongAttempt,
-                wrong_otp_attempt: data.wrongOtpAttempt,
-                last_login: data.lastLogin,
-                status: data.status,
-                locked: data.locked,
-                is_deleted: data.isDeleted,
-            },
-        });
-
-        return {
-            ...account,
-            id: Number(account.id),
-        };
+            // Check if username already exists
+            const existingAccount = await prisma.account.findUnique({
+                where: {
+                    username: data.account.username
+                }
+            });
+            const existingUser = await prisma.users.findUnique({
+                where: {
+                    email: data?.email
+                }
+            });
+            
+            if(existingUser){
+                throw APIError.alreadyExists("Email already exists");
+            }
+            if (existingAccount) {
+                throw APIError.alreadyExists("Username already exists");
+            }
+           
+            // Hash the password
+            const hashedPassword = await bcrypt.hash(data?.account?.password || "", 10);
+            
+            // Create the account
+            return await prisma.$transaction(async (tx) => {
+                // Create the account with all required fields
+                const account = await tx.account.create({
+                    data: {
+                        username: data.account?.username || "",
+                        password: hashedPassword,
+                        active: true,
+                        status: 1,
+                        locked: false,
+                        is_deleted: false,
+                        created_ts: Math.floor(Date.now() / 1000)
+                    },
+                });
+        
+                // Create the user associated with the account
+                const user = await tx.users.create({
+                    data: {
+                        first_name: data.firstName,
+                        last_name: data.lastName,
+                        phone: data.phone,
+                        email: data.email,
+                        type: data.type,
+                        created_ts: Math.floor(Date.now() / 1000),
+                        account_id: account.id,
+                    },
+                });
+        
+                // Format response according to CreateUserAndAccountResponse interface
+                const response: CreateUserAndAccountResponse = {
+                    id: user.id,
+                    firstName: user?.first_name || "",
+                    lastName: user.last_name || "",
+                    phone: user.phone ?? undefined,
+                    email: user.email || "",
+                    username: account.username || "",
+                };
+        
+                return { 
+                    success: true,
+                    message: "User and account created successfully",
+                    result: response
+                };
+            });
+        } catch (error) {
+            console.error("Error creating user with account:", error);
+            // if (error === "P2002") {
+            //     throw APIError.alreadyExists("Username already exists");
+            // }
+            throw error;
+        }
     },
 
     async login(

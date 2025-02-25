@@ -113,6 +113,42 @@ export interface CreateUser {
     /** Error message if the request was not successful */
     message?: string;
     /** Category data */
-    result?: User | User[];
+    result?: User | User[] | UserAccountResponse | CreateUserAndAccountResponse;
   }
   
+
+  
+  export interface CreateUserAndAccountRequest{
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+    type?: string;
+    account ? :CreateAccountRequest
+  }
+  export interface CreateAccountRequest {
+    username: string;
+    password: string ;
+
+  }
+
+  export interface CreateUserAndAccountResponse {
+    id: number;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+    username: string;
+    
+}
+
+  export interface UserAccountResponse{
+    id: number;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+    account ?: Account
+
+  }
+ 
