@@ -1,22 +1,6 @@
 import { api, APIError } from "encore.dev/api";
 import { UserService } from "./auth.service";
-import { CreateAccountDto, CreateUserAndAccountRequest, UserResponse } from "./Interface";
-
-export const create = api(
-    { expose: true, method: "POST", path: "/account" },
-    async (data: CreateAccountDto): Promise<UserResponse> => {
-        try {
-            const result = await UserService.createAccount(data);
-
-            return {
-                success: true,
-                message: "User created successfully",
-            };
-        } catch (error) {
-            throw APIError.aborted(error?.toString() || "Error creating user");
-        }
-    }
-);
+import { CreateUserAndAccountRequest, UserResponse } from "./Interface";
 
 export const refreshToken = api(
     { expose: true, method: "POST", path: "/auth/refresh" },
