@@ -1,15 +1,19 @@
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { CreateAccountDto, CreateUserAndAccountRequest, CreateUserAndAccountResponse, UserResponse } from "./Interface";
+import { CreateAccountDto, CreateUserAndAccountRequest, CreateUserAndAccountResponse, LoginResponse, TokenResponse, UserAccountResponse, UserResponse } from "./Interface";
 import { APIError } from "encore.dev/api";
 import axios from "axios";
+import { env } from "../../config/env.config";
+import { prisma } from "../../lib/prisma";
 
-const SECRET_KEY = "nK4h9P#mY2x$vL8q5W3jR7tZ9nB2cF5v";
-const prisma = new PrismaClient();
+if (!env.JWT_SECRET_KEY) {
+    throw new Error('JWT_SECRET_KEY is not defined in environment variables');
+}
 
-export const UserService = {
-    create:async (data: CreateUserAndAccountRequest): Promise<UserResponse> => {
+const SECRET_KEY = env.JWT_SECRET_KEY;
+
+export const AuthService = {
+    create: async (data: CreateUserAndAccountRequest): Promise<UserResponse> => {
         try {
             // Validate required fields
             if (!data.firstName?.trim()) {
@@ -77,15 +81,18 @@ export const UserService = {
                         account_id: account.id,
                     },
                 });
-        
-                // Format response according to CreateUserAndAccountResponse interface
-                const response: CreateUserAndAccountResponse = {
+
+                // Format response according to UserAccountResponse interface
+                const response: UserAccountResponse = {
                     id: user.id,
-                    firstName: user?.first_name || "",
+                    firstName: user.first_name || "",
                     lastName: user.last_name || "",
-                    phone: user.phone ?? undefined,
+                    phone: user.phone || undefined,
                     email: user.email || "",
-                    username: account.username || "",
+                    account: {
+                        id: account.id,
+                        username: account.username || ""
+                    }
                 };
         
                 return { 
@@ -96,191 +103,265 @@ export const UserService = {
             });
         } catch (error) {
             console.error("Error creating user with account:", error);
-            // if (error === "P2002") {
-            //     throw APIError.alreadyExists("Username already exists");
-            // }
-            throw error;
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to create user and account");
         }
     },
-   
-    async login(
+
+    login: async (
         username: string,
         password: string,
         recaptchaToken: string,
-        authType: string,
+        authType: "CREDENTIALS" | "MPIN",
         mpin: number,
         deviceId: string,
         deviceType: string,
         userId?: number
-    ) {
-        if (authType === "CREDENTIALS") {
-            await this.verifyCaptcha(recaptchaToken);
-            const account = await this.getAccountByCredentials(username);
-            if (!account || !account.password) return this.failedLoginResponse();
-    
-            this.ensureAccountNotLocked(account);
-    
-            await this.verifyPassword(password, account);
-    
-            // Ensure username is not null before using it
-            if (!account.username) {
-                throw APIError.permissionDenied("Invalid account: Username is missing");
-            }
-    
-            await this.resetFailedAttempts(account.username);
-    
-            return this.generateTokens(account);
-        }
-    
-        if (authType === "MPIN") {
-            if (!userId) {
-                throw APIError.permissionDenied("User ID is required for MPIN authentication.");
-            }
-    
-            this.validateMpinRequest(mpin, userId, deviceId, deviceType);
-            const account = await this.getAccountByUserId(userId);
-            if (!account || !account.mpin) return this.failedLoginResponse();
-    
-            this.ensureAccountNotLocked(account);
-            await this.verifyMpin(account, mpin, deviceId, userId);
-    
-            return this.generateTokens(account);
-        }
-    
-        return this.failedLoginResponse();
-    },    
-
-    async verifyCaptcha(recaptchaToken: string) {
-        if (!recaptchaToken) throw APIError.permissionDenied("Captcha token is required");
+    ): Promise<LoginResponse> => {
         try {
-            await verifyRecaptcha(recaptchaToken);
-        } catch {
-            throw APIError.permissionDenied("Invalid captcha");
-        }
-    },
-    
-    async getAccountByCredentials(username: string) {
-        return prisma.account.findUnique({
-            where: { username },
-            select: { id: true, username: true, password: true, wrong_attempt: true, locked: true },
-        });
-    },
-    
-    async getAccountByUserId(userId: number) {
-        return prisma.account.findUnique({
-            where: { id: userId },
-            select: { id: true, username: true, mpin: true, device_id: true, wrong_attempt: true, locked: true },
-        });
-    },
-    
-    ensureAccountNotLocked(account: any) {
-        if (account.locked) throw APIError.permissionDenied("Your account is locked due to multiple failed login attempts.");
-    },
-    
-    async verifyPassword(password: string, account: any) {
-        const isPasswordValid = await bcrypt.compare(password, account.password);
-        if (!isPasswordValid) await this.handleFailedLogin(account, account.username, true);
-    },
-    
-    async verifyMpin(account: any, mpin: number, deviceId: string, userId: number) {
-        const isMpinValid = mpin === account.mpin;
-        const isDeviceValid = deviceId === account.device_id;
-    
-        if (!isMpinValid || !isDeviceValid) {
-            const reason = !isMpinValid ? "Invalid MPIN" : "Device ID mismatch";
-            await this.handleFailedLogin(account, userId, false, reason);
-        }
-    },
-    
-    async handleFailedLogin(
-        account: any, 
-        identifier: string | number, 
-        isUsername: boolean, 
-        reason: string = "Invalid credentials"
-    ) {
-        const updatedAttempts = (account.wrong_attempt || 0) + 1;
-        const isLocked = updatedAttempts >= 3;
-    
-        await prisma.account.update({
-            where: isUsername 
-                ? { username: identifier as string }
-                : { id: identifier as number },
-            data: { wrong_attempt: updatedAttempts, locked: isLocked },
-        });
-    
-        throw APIError.permissionDenied(
-            isLocked ? "Your account is locked due to multiple failed login attempts." : reason
-        );
-    },    
-    
-    async resetFailedAttempts(identifier: string | number) {
-        await prisma.account.update({
-            where: typeof identifier === "string" ? { username: identifier } : { id: identifier },
-            data: { wrong_attempt: 0, last_login: Math.floor(Date.now() / 1000) },
-        });
-    },
-    
-    generateTokens(account: any) {
-        const accessToken = jwt.sign({ id: account.id, username: account.username }, SECRET_KEY, { expiresIn: "15m" });
-        const refreshToken = jwt.sign({ id: account.id }, SECRET_KEY, { expiresIn: "7d" });
-    
-        return { success: true, accessToken, refreshToken };
-    },
-    
-    failedLoginResponse() {
-        return { success: false, accessToken: "", refreshToken: "" };
-    },
-    
-    async validateMpinRequest(mpin: number, userId: number, deviceId: string, deviceType: string) {
-        if (!mpin || !userId || !deviceId || !deviceType) {
-            throw APIError.permissionDenied("MPIN and userId are required for MPIN authentication.");
-        }
-    },    
-    
-    async saveMpin(mpin: number, deviceId: string, deviceType: string, userId?: number) {
-        if (!mpin || !deviceId || !deviceType || !userId) {
-            throw APIError.permissionDenied("MPIN, Device ID, Device Type, and User ID are required.");
-        }
-   
-        const user = await prisma.users.findUnique({
-            where: { id: userId },
-            select: { account_id: true },
-        });
+            if (authType === "CREDENTIALS") {
+                // Verify captcha
+                if (!recaptchaToken) {
+                    throw APIError.invalidArgument("Captcha token is required");
+                }
 
-        if (!user || !user.account_id) {
-            throw APIError.notFound("User not found or account not linked.");
+                const isCaptchaValid = await verifyRecaptcha(recaptchaToken);
+             
+                // Get account
+                const account = await prisma.account.findUnique({
+                    where: { username },
+                    select: {
+                        id: true,
+                        username: true,
+                        password: true,
+                        wrong_attempt: true,
+                        locked: true
+                    },
+                });
+
+                if (!account?.password) {
+                    throw APIError.permissionDenied("Invalid credentials");
+                }
+
+                // Check if account is locked
+                if (account.locked) {
+                    throw APIError.permissionDenied("Your account is locked due to multiple failed login attempts");
+                }
+
+                // Verify password
+                const isPasswordValid = await bcrypt.compare(password, account.password);
+                if (!isPasswordValid) {
+                    const updatedAttempts = (account.wrong_attempt || 0) + 1;
+                    const isLocked = updatedAttempts >= 3;
+
+                    await prisma.account.update({
+                        where: { username },
+                        data: {
+                            wrong_attempt: updatedAttempts,
+                            locked: isLocked
+                        },
+                    });
+
+                    throw APIError.permissionDenied(
+                        isLocked 
+                            ? "Your account is locked due to multiple failed login attempts"
+                            : "Invalid credentials"
+                    );
+                }
+
+                // Reset failed attempts and update last login
+                await prisma.account.update({
+                    where: { username },
+                    data: {
+                        wrong_attempt: 0,
+                        last_login: Math.floor(Date.now() / 1000)
+                    },
+                });
+
+                // Generate tokens
+                const accessToken = jwt.sign(
+                    { id: account.id, username: account.username },
+                    SECRET_KEY,
+                    { expiresIn: "15m" }
+                );
+                const refreshToken = jwt.sign(
+                    { id: account.id },
+                    SECRET_KEY,
+                    { expiresIn: "7d" }
+                );
+
+                return {
+                    success: true,
+                    message: "Login successful",
+                    result: { accessToken, refreshToken }
+                };
+            }
+
+            if (authType === "MPIN") {
+                // Validate MPIN request
+                if (!userId || !mpin || !deviceId || !deviceType) {
+                    throw APIError.invalidArgument("All MPIN authentication fields are required");
+                }
+
+                // Get account
+                const account = await prisma.account.findUnique({
+                    where: { id: userId },
+                    select: {
+                        id: true,
+                        username: true,
+                        mpin: true,
+                        device_id: true,
+                        wrong_attempt: true,
+                        locked: true
+                    },
+                });
+
+                if (!account?.mpin) {
+                    throw APIError.permissionDenied("Invalid MPIN credentials");
+                }
+
+                // Check if account is locked
+                if (account.locked) {
+                    throw APIError.permissionDenied("Your account is locked due to multiple failed login attempts");
+                }
+
+                // Verify MPIN and device
+                const isMpinValid = mpin === account.mpin;
+                const isDeviceValid = deviceId === account.device_id;
+
+                if (!isMpinValid || !isDeviceValid) {
+                    const updatedAttempts = (account.wrong_attempt || 0) + 1;
+                    const isLocked = updatedAttempts >= 3;
+
+                    await prisma.account.update({
+                        where: { id: userId },
+                        data: {
+                            wrong_attempt: updatedAttempts,
+                            locked: isLocked
+                        },
+                    });
+
+                    throw APIError.permissionDenied(
+                        isLocked
+                            ? "Your account is locked due to multiple failed login attempts"
+                            : !isMpinValid ? "Invalid MPIN" : "Device ID mismatch"
+                    );
+                }
+
+                // Generate tokens
+                const accessToken = jwt.sign(
+                    { id: account.id, username: account.username },
+                    SECRET_KEY,
+                    { expiresIn: "15m" }
+                );
+                const refreshToken = jwt.sign(
+                    { id: account.id },
+                    SECRET_KEY,
+                    { expiresIn: "7d" }
+                );
+
+                return {
+                    success: true,
+                    message: "Login successful",
+                    result: { accessToken, refreshToken }
+                };
+            }
+
+            throw APIError.invalidArgument("Invalid authentication type");
+        } catch (error) {
+            console.error("Error in login:", error);
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Login failed");
         }
-   
-        await prisma.account.update({
-            where: { id: user.account_id },
-            data: {
-                mpin,
-                device_id: deviceId,
-                device_type: deviceType,
-                updated_ts: Math.floor(Date.now() / 1000),
-            },
-        });
-   
-        return { success: true, message: "MPIN saved successfully." };
     },
 
-    async refreshToken(refreshToken: string) {
+    saveMpin: async (
+        mpin: number,
+        deviceId: string,
+        deviceType: string,
+        userId?: number
+    ): Promise<{ success: boolean; message: string }> => {
         try {
+            // Validate required fields
+            if (!mpin || !deviceId || !deviceType || !userId) {
+                throw APIError.invalidArgument("MPIN, Device ID, Device Type, and User ID are required");
+            }
+
+            // Get user and check if account exists
+            const user = await prisma.users.findUnique({
+                where: { id: userId },
+                select: { account_id: true },
+            });
+
+            if (!user?.account_id) {
+                throw APIError.notFound("User not found or account not linked");
+            }
+
+            // Update account with MPIN and device info
+            await prisma.account.update({
+                where: { id: user.account_id },
+                data: {
+                    mpin,
+                    device_id: deviceId,
+                    device_type: deviceType,
+                    updated_ts: Math.floor(Date.now() / 1000)
+                },
+            });
+
+            return {
+                success: true,
+                message: "MPIN saved successfully"
+            };
+        } catch (error) {
+            console.error("Error saving MPIN:", error);
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to save MPIN");
+        }
+    },
+
+    refreshToken: async (refreshToken: string): Promise<TokenResponse> => {
+        try {
+            // Verify refresh token
             const payload = jwt.verify(refreshToken, SECRET_KEY) as { id: number };
 
-            const newAccessToken = jwt.sign({ id: payload.id }, SECRET_KEY, { expiresIn: "15m" });
-            const newRefreshToken = jwt.sign({ id: payload.id }, SECRET_KEY, { expiresIn: "7d" });
+            // Get account
+            const account = await prisma.account.findUnique({
+                where: { id: payload.id },
+                select: { id: true, username: true }
+            });
 
-            return { accessToken: newAccessToken, newRefreshToken };
+            if (!account?.id) {
+                throw APIError.permissionDenied("Invalid refresh token");
+            }
+
+            // Generate new tokens
+            const accessToken = jwt.sign(
+                { id: account.id, username: account.username },
+                SECRET_KEY,
+                { expiresIn: "15m" }
+            );
+            const newRefreshToken = jwt.sign(
+                { id: account.id },
+                SECRET_KEY,
+                { expiresIn: "7d" }
+            );
+
+            return {
+                success: true,
+                message: "Token refreshed successfully",
+                result: { accessToken, refreshToken: newRefreshToken }
+            };
         } catch (error) {
+            console.error("Error refreshing token:", error);
+            if (error instanceof APIError) throw error;
             throw APIError.permissionDenied("Invalid refresh token");
         }
-    },
+    }
 };
 
-async function verifyRecaptcha(recaptchaToken: string) {
-    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
-    const verifyUrl = process.env.RECAPTCHA_VERIFY_URL || "https://www.google.com/recaptcha/api/siteverify";
+async function verifyRecaptcha(recaptchaToken: string): Promise<boolean> {
+    const secretKey = env.RECAPTCHA_SECRET_KEY;
+    const verifyUrl = env.RECAPTCHA_VERIFY_URL || "https://www.google.com/recaptcha/api/siteverify";
 
     try {
         const response = await axios.post(verifyUrl, null, {
@@ -290,15 +371,7 @@ async function verifyRecaptcha(recaptchaToken: string) {
             },
         });
 
-        console.log("reCAPTCHA Response:", response.data);
-
-        const { success, score, hostname } = response.data;
-
-        if (!success) {
-            throw new Error("Invalid captcha");
-        }
-
-        return true;
+        return response.data.success;
     } catch (error) {
         console.error("Error verifying reCAPTCHA:", error);
         return false;

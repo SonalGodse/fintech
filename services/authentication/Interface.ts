@@ -148,7 +148,19 @@ export interface CreateUser {
     lastName: string;
     phone?: string;
     email: string;
-    account ?: Account
-
+    account: {
+        id: number;
+        username: string;
+    }
   }
- 
+
+  export interface TokenResponse {
+    success: boolean;
+    message: string;
+    result: {
+        accessToken: string;
+        refreshToken: string;
+    };
+}
+
+export interface LoginResponse extends TokenResponse {}

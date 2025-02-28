@@ -1,55 +1,58 @@
 import { api, APIError } from "encore.dev/api";
-import { UserService } from "./auth.service";
-import { CreateUserAndAccountRequest, UserResponse } from "./Interface";
+import { CreateUserAndAccountRequest, LoginResponse, UserResponse, UserAccountResponse } from "./Interface";
+import { AuthService } from "./auth.service";
 
 export const refreshToken = api(
     { expose: true, method: "POST", path: "/auth/refresh" },
-    async (data: { refreshToken: string }) => {
+    async ({ data }: { data: { refreshToken: string } }): Promise<{ accessToken: string; refreshToken: string }> => {
         try {
-            const { accessToken, newRefreshToken } = await UserService.refreshToken(data.refreshToken);
-
-            return { accessToken, refreshToken: newRefreshToken };
+            const response = await AuthService.refreshToken(data.refreshToken);
+            return {
+                accessToken: response.result.accessToken,
+                refreshToken: response.result.refreshToken
+            };
         } catch (error) {
-            throw APIError.permissionDenied("Invalid refresh token");
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to refresh token");
         }
     }
 );
 
 export const login = api(
     { expose: true, method: "POST", path: "/auth/login" },
-    async (data: { 
-        username: string; 
-        password?: string; 
-        recaptchaToken?: string; 
-        authType?: string; 
-        mpin?: number; 
-        deviceId?: string; 
-        deviceType: string; 
-        userId?: number 
-    }) => {
+    async ({ data }: { data: { 
+        username: string;
+        password?: string;
+        recaptchaToken?: string;
+        authType?: "CREDENTIALS" | "MPIN";
+        mpin?: number;
+        deviceId?: string;
+        deviceType?: string;
+        userId?: number;
+    } }): Promise<{ accessToken: string; refreshToken: string }> => {
         try {
             if (data.authType === "CREDENTIALS" && !data.recaptchaToken) {
                 throw APIError.permissionDenied("Captcha token is required");
             }
 
-            const { success, accessToken, refreshToken } = await UserService.login(
+            const response = await AuthService.login(
                 data.username,
                 data.password || "", 
                 data.recaptchaToken || "", 
                 data.authType || "CREDENTIALS",
-                data.mpin || 0,             
-                data.deviceId || "",          
-                data.deviceType,       
-                data.userId                   
+                data.mpin || 0,
+                data.deviceId || "",
+                data.deviceType || "",
+                data.userId
             );
 
-            if (!success) {
-                throw APIError.permissionDenied("Invalid credentials");
-            }
-
-            return { accessToken, refreshToken };
+            return {
+                accessToken: response.result.accessToken,
+                refreshToken: response.result.refreshToken
+            };
         } catch (error) {
-            throw APIError.aborted(error?.toString() || "Login failed");
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Login failed");
         }
     }
 );
@@ -58,7 +61,7 @@ export const saveMpin = api(
     { expose: true, method: "POST", path: "/auth/save-mpin" },
     async (data: { mpin: number; deviceId: string; deviceType: string; userId?: number }) => {
         try {
-            const response = await UserService.saveMpin(data.mpin, data.deviceId, data.deviceType, data.userId);
+            const response = await AuthService.saveMpin(data.mpin, data.deviceId, data.deviceType, data.userId);
             return response;
         } catch (error) {
             throw APIError.aborted(error?.toString() || "Failed to save MPIN");
@@ -68,13 +71,13 @@ export const saveMpin = api(
 
 export const createUserAndAccount = api(
     { expose: true, method: "POST", path: "/userAccount" },
-    async (data: CreateUserAndAccountRequest): Promise<UserResponse> => {
+    async ({ data }: { data: CreateUserAndAccountRequest }): Promise<UserAccountResponse> => {
         try {
-            await UserService.create(data);
-            return { success: true, message: "User created successfully" };
+            const response = await AuthService.create(data);
+            return response.result as UserAccountResponse;
         } catch (error) {
-            throw APIError.aborted(error?.toString() || "Error creating user");
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to create user");
         }
     }
 );
- 
