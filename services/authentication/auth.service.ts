@@ -5,6 +5,7 @@ import { APIError } from "encore.dev/api";
 import axios from "axios";
 import { env } from "../../config/env.config";
 import { prisma } from "../../lib/prisma";
+import nodemailer from "nodemailer";
 
 if (!env.JWT_SECRET_KEY) {
     throw new Error('JWT_SECRET_KEY is not defined in environment variables');
@@ -344,7 +345,63 @@ export const AuthService = {
             if (error instanceof APIError) throw error;
             throw APIError.permissionDenied("Invalid refresh token");
         }
-    }
+    },
+
+    async forgotPassword(username: string) {
+        const account = await prisma.account.findUnique({
+            where: { username },
+            include: { users: true }, 
+        });
+
+        if (!account || !account.users.length) {
+            throw APIError.notFound("User not found");
+        }
+
+        const userEmail = account.users[0].email;
+
+        if (!userEmail) {
+            throw APIError.invalidArgument("User does not have an associated email.");
+        }
+
+        const resetToken = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" });
+        console.log(resetToken);
+        await this.sendResetPasswordEmail(userEmail, resetToken);
+    },
+
+    async sendResetPasswordEmail(email: string, token: string) {
+        const transporter = nodemailer.createTransport({
+            service: "gmail",
+            auth: {
+                user: "mahalealka22@gmail.com",
+                pass: "gcle izwa cfng grpj",
+            },
+        });
+
+        const resetLink = `https://google.com=${token}`;
+        const mailOptions = {
+            from: "no-reply@yourapp.com",
+            to: email,
+            subject: "Password Reset Request",
+            text: `Click the link below to reset your password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
+        };
+
+        await transporter.sendMail(mailOptions);
+    },
+
+    async resetPassword(token: string, newPassword: string) {
+        try {
+            const decoded = jwt.verify(token, SECRET_KEY) as { username: string };
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+            await prisma.account.update({
+                where: { username: decoded.username },
+                data: { password: hashedPassword },
+            });
+        } catch (error) {
+            throw APIError.permissionDenied("Invalid or expired reset token");
+        }
+    },
 };
 
 async function verifyRecaptcha(recaptchaToken: string): Promise<boolean> {

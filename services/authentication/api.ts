@@ -81,3 +81,27 @@ export const createUserAndAccount = api(
         }
     }
 );
+
+export const forgotPassword = api(
+    { expose: true, method: "POST", path: "/auth/forgot-password" },
+    async (data: { username: string }) => {
+        try {
+            await AuthService.forgotPassword(data.username);
+            return { success: true, message: "Reset password link sent to email." };
+        } catch (error) {
+            throw APIError.aborted(error?.toString() || "Failed to process forgot password request");
+        }
+    }
+);
+
+export const resetPassword = api(
+    { expose: true, method: "POST", path: "/auth/reset-password" },
+    async (data: { token: string; newPassword: string }) => {
+        try {
+            await AuthService.resetPassword(data.token, data.newPassword);
+            return { success: true, message: "Password reset successfully." };
+        } catch (error) {
+            throw APIError.aborted(error?.toString() || "Failed to reset password");
+        }
+    }
+);

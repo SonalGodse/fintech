@@ -11,6 +11,7 @@
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^20.5.7",
+    "@types/nodemailer": "^6.4.17",
     "prisma": "^6.4.0",
     "typescript": "^5.2.2",
     "vitest": "^1.5.0"
@@ -19,8 +20,11 @@
     "@prisma/client": "^6.4.0",
     "axios": "^1.7.9",
     "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
     "encore.dev": "^1.46.4",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.10.0",
+    "zod": "^3.24.2"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.13.0"
