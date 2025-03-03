@@ -12,6 +12,21 @@ if (!env.JWT_SECRET_KEY) {
 
 const SECRET_KEY = env.JWT_SECRET_KEY;
 
+// Helper function to generate tokens
+const generateTokens = (accountId: number, username: string) => {
+    const accessToken = jwt.sign(
+        { id: accountId, username },
+        SECRET_KEY,
+        { expiresIn: "15m" }
+    );
+    const refreshToken = jwt.sign(
+        { id: accountId },
+        SECRET_KEY,
+        { expiresIn: "7d" }
+    );
+    return { accessToken, refreshToken };
+};
+
 export const AuthService = {
     create: async (data: CreateUserAndAccountRequest): Promise<UserResponse> => {
         try {
@@ -179,16 +194,7 @@ export const AuthService = {
                 });
 
                 // Generate tokens
-                const accessToken = jwt.sign(
-                    { id: account.id, username: account.username },
-                    SECRET_KEY,
-                    { expiresIn: "15m" }
-                );
-                const refreshToken = jwt.sign(
-                    { id: account.id },
-                    SECRET_KEY,
-                    { expiresIn: "7d" }
-                );
+                const { accessToken, refreshToken } = generateTokens(account.id, account?.username || "");
 
                 return {
                     success: true,
@@ -249,16 +255,7 @@ export const AuthService = {
                 }
 
                 // Generate tokens
-                const accessToken = jwt.sign(
-                    { id: account.id, username: account.username },
-                    SECRET_KEY,
-                    { expiresIn: "15m" }
-                );
-                const refreshToken = jwt.sign(
-                    { id: account.id },
-                    SECRET_KEY,
-                    { expiresIn: "7d" }
-                );
+                const { accessToken, refreshToken } = generateTokens(account.id, account?.username || "");
 
                 return {
                     success: true,
@@ -335,16 +332,7 @@ export const AuthService = {
             }
 
             // Generate new tokens
-            const accessToken = jwt.sign(
-                { id: account.id, username: account.username },
-                SECRET_KEY,
-                { expiresIn: "15m" }
-            );
-            const newRefreshToken = jwt.sign(
-                { id: account.id },
-                SECRET_KEY,
-                { expiresIn: "7d" }
-            );
+            const { accessToken, refreshToken: newRefreshToken } = generateTokens(account.id, account?.username || "");
 
             return {
                 success: true,
