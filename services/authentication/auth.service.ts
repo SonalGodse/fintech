@@ -59,19 +59,19 @@ export const AuthService = {
                     email: data?.email
                 }
             });
-            
-            if(existingUser){
+
+            if (existingUser) {
                 throw APIError.alreadyExists("Email already exists");
             }
             if (existingAccount) {
                 throw APIError.alreadyExists("Username already exists");
             }
-           
+
             // Hash the password
             const hashedPassword = await bcrypt.hash(data?.account?.password || "", 10);
-            
+
             // Create the account
-            return await prisma.$transaction(async (tx) => {
+            return await prisma.$transaction(async (tx: { account: { create: (arg0: { data: { username: string; password: string; active: boolean; status: number; locked: boolean; is_deleted: boolean; created_ts: number; }; }) => any; }; users: { create: (arg0: { data: { first_name: string; last_name: string; phone: string | undefined; email: string; type: string | undefined; created_ts: number; account_id: any; }; }) => any; }; }) => {
                 // Create the account with all required fields
                 const account = await tx.account.create({
                     data: {
@@ -84,7 +84,7 @@ export const AuthService = {
                         created_ts: Math.floor(Date.now() / 1000)
                     },
                 });
-        
+
                 // Create the user associated with the account
                 const user = await tx.users.create({
                     data: {
@@ -110,8 +110,8 @@ export const AuthService = {
                         username: account.username || ""
                     }
                 };
-        
-                return { 
+
+                return {
                     success: true,
                     message: "User and account created successfully",
                     result: response
@@ -142,8 +142,7 @@ export const AuthService = {
                 }
 
                 const isCaptchaValid = await verifyRecaptcha(recaptchaToken);
-             
-                // Get account
+
                 const account = await prisma.account.findUnique({
                     where: { username },
                     select: {
@@ -179,7 +178,7 @@ export const AuthService = {
                     });
 
                     throw APIError.permissionDenied(
-                        isLocked 
+                        isLocked
                             ? "Your account is locked due to multiple failed login attempts"
                             : "Invalid credentials"
                     );
@@ -350,7 +349,7 @@ export const AuthService = {
     async forgotPassword(username: string) {
         const account = await prisma.account.findUnique({
             where: { username },
-            include: { users: true }, 
+            include: { users: true },
         });
 
         if (!account || !account.users.length) {
@@ -358,51 +357,86 @@ export const AuthService = {
         }
 
         const userEmail = account.users[0].email;
-
+        const userId = account.users[0].id;
         if (!userEmail) {
             throw APIError.invalidArgument("User does not have an associated email.");
         }
 
         const resetToken = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" });
         console.log(resetToken);
-        await this.sendResetPasswordEmail(userEmail, resetToken);
+        await this.sendResetPasswordEmail(userId);
     },
 
-    async sendResetPasswordEmail(email: string, token: string) {
-        const transporter = nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-                user: "mahalealka22@gmail.com",
-                pass: "gcle izwa cfng grpj",
-            },
-        });
-
-        const resetLink = `https://google.com=${token}`;
-        const mailOptions = {
-            from: "no-reply@yourapp.com",
-            to: email,
-            subject: "Password Reset Request",
-            text: `Click the link below to reset your password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
-        };
-
-        await transporter.sendMail(mailOptions);
-    },
-
-    async resetPassword(token: string, newPassword: string) {
+    async sendResetPasswordEmail(userId: number) {
         try {
-            const decoded = jwt.verify(token, SECRET_KEY) as { username: string };
+            // Define the email payload
+            const emailPayload = {
+                userId: userId,
+                event: "forget_password",
+                "eventType": ["email"]
+            };
+
+            // Send email using your external service
+            const response = await axios.post('https://4cb8-202-149-218-18.ngrok-free.app/send-notification', emailPayload, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            console.log("✅ Email sent successfully:", response.data);
+            return response.data;
+        } catch (error) {
+            console.error("❌ Error sending reset password email:", error);
+            throw new Error("Failed to send password reset email");
+        }
+    },
+
+    async resetPassword(guid: string, newPassword: string) {
+        try {
+            console.log("Fetching enrollment record...");
+
+            const enrollmentRecord = await prisma.enrollment.findFirst({
+                where: {
+                    guid: guid,
+                    expiry_date: {
+                        gte: Math.floor(Date.now() / 1000),
+                    },
+                },
+            });
+
+            if (!enrollmentRecord) {
+                throw APIError.permissionDenied("Invalid or expired reset link");
+            }
+
+            const user = await prisma.users.findUnique({
+                where: { id: enrollmentRecord.user_id },
+            });
+
+            if (!user) {
+                throw APIError.permissionDenied("User not found");
+            }
+
+            console.log("User found:", user);
 
             const hashedPassword = await bcrypt.hash(newPassword, 10);
 
             await prisma.account.update({
-                where: { username: decoded.username },
+                where: { id: user.account_id },
                 data: { password: hashedPassword },
             });
+
+            await prisma.enrollment.update({
+                where: { id: enrollmentRecord.id },
+                data: { status: "completed", updated_ts: Math.floor(Date.now() / 1000) },
+            });
+
         } catch (error) {
-            throw APIError.permissionDenied("Invalid or expired reset token");
+            console.error("Error resetting password:", error);
+            throw APIError.permissionDenied("Invalid or expired reset link");
         }
-    },
-};
+    }
+
+}
 
 async function verifyRecaptcha(recaptchaToken: string): Promise<boolean> {
     const secretKey = env.RECAPTCHA_SECRET_KEY;

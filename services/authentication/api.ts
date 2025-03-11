@@ -96,12 +96,70 @@ export const forgotPassword = api(
 
 export const resetPassword = api(
     { expose: true, method: "POST", path: "/auth/reset-password" },
-    async (data: { token: string; newPassword: string }) => {
+    async (data: { guid: string; newPassword: string }) => {
         try {
-            await AuthService.resetPassword(data.token, data.newPassword);
+            await AuthService.resetPassword(data.guid, data.newPassword);
             return { success: true, message: "Password reset successfully." };
         } catch (error) {
             throw APIError.aborted(error?.toString() || "Failed to reset password");
         }
     }
 );
+
+
+import { Header, Query,  } from "encore.dev/api";
+ 
+// Define the request structure
+interface Request {
+  // The token passed as a query parameter
+  token: Query<string>;
+}
+ 
+interface Response {
+  message: string;
+  token?: string;
+}
+ 
+interface Request {
+  token: string;
+}
+ 
+interface Response {
+  message: string;
+  token?: string;
+}
+ 
+export const getGuidDetail = api<Request, Response>(
+  { expose: true, method: "GET", path: "/verify-reset-token " },
+  async ({ token }) => {
+    try {
+      // Validate token input
+      if (!token || typeof token !== "string") {
+        return { message: "Token is required and must be a string" };
+      }
+ 
+      // Fetch enrollment details based on guid
+      const enrollment = await prisma.enrollment.findFirst({
+        where: { guid: token },
+      });
+ 
+      // Handle invalid token
+      if (!enrollment) {
+        return { message: "Invalid token" };
+      }
+ 
+      // Check if the token is expired
+      const now = Math.floor(Date.now() / 1000); // Current time in seconds
+      if (enrollment.expiry_date && enrollment.expiry_date < now) {
+        return { message: "Token has expired" };
+      }
+ 
+      // Return success response
+      return { message: "Token is valid. Details retrieved successfully.", token };
+    } catch (error) {
+      console.error("Error retrieving GUID details:", error);
+      return { message: "Internal Server Error" };
+    }
+  }
+);
+ 
