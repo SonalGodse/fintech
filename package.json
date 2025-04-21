@@ -9,6 +9,8 @@
     "test": "vitest"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^20.5.7",
     "@types/nodemailer": "^6.4.17",
@@ -20,10 +22,14 @@
     "@prisma/client": "^6.4.0",
     "axios": "^1.7.9",
     "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "encore.dev": "^1.46.4",
+    "encore.dev": "^1.46.18",
+    "express": "^5.1.0",
+    "ioredis": "^5.6.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.0",
+    "redis": "^4.7.0",
     "zod": "^3.24.2"
   },
   "optionalDependencies": {

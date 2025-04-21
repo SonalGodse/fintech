@@ -137,12 +137,11 @@ export const getGuidDetail = api<Request, Response>(
       if (!token || typeof token !== "string") {
         return { message: "Token is required and must be a string" };
       }
- 
       // Fetch enrollment details based on guid
-      const enrollment = await prisma.enrollment.findFirst({
+      const enrollment = await prisma?.enrollment.findFirst({
         where: { guid: token },
       });
- 
+
       // Handle invalid token
       if (!enrollment) {
         return { message: "Invalid token" };
@@ -162,4 +161,35 @@ export const getGuidDetail = api<Request, Response>(
     }
   }
 );
+
+export const verifyOtp = api(
+    { expose: true, method: "POST", path: "/auth/verify-otp" },
+    async ({ data }: { data: { username: string; otp: number } }) => {
+        try {
+            const response = await AuthService.verifyOtp(data.username, data.otp);
+            return {
+                success: true,
+                message: "OTP verified successfully. Login successful.",
+                result: response
+            };
+        } catch (error) {
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to verify OTP");
+        }
+    }
+);
+
+export const deleteUser = api(
+    { expose: true, method: "DELETE", path: "/user/:userId" },
+    async ({ userId }: { userId: number }): Promise<{ success: boolean; message: string }> => {
+        try {
+            const response = await AuthService.deleteUser(userId);
+            return response;
+        } catch (error) {
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to delete user");
+        }
+    }
+);
+
  

@@ -4,8 +4,8 @@ import { CreateAccountDto, CreateUserAndAccountRequest, CreateUserAndAccountResp
 import { APIError } from "encore.dev/api";
 import axios from "axios";
 import { env } from "../../config/env.config";
+import redis from "../authentication/redis"; // Import Redis connection
 import { prisma } from "../../lib/prisma";
-import nodemailer from "nodemailer";
 
 if (!env.JWT_SECRET_KEY) {
     throw new Error('JWT_SECRET_KEY is not defined in environment variables');
@@ -150,7 +150,8 @@ export const AuthService = {
                         username: true,
                         password: true,
                         wrong_attempt: true,
-                        locked: true
+                        locked: true,
+                        istwofaenabled: true,
                     },
                 });
 
@@ -195,7 +196,45 @@ export const AuthService = {
 
                 // Generate tokens
                 const { accessToken, refreshToken } = generateTokens(account.id, account?.username || "");
+                console.log(account)
+                if (account.istwofaenabled) {
+                    const otp = Math.floor(100000 + Math.random() * 900000); // Generate a 6-digit OTP
+                    const otpKey = `otp:${username}`; // Unique key for Redis
+                    const otpExpiry = 300; // 5 minutes (in seconds)
+                    console.log(otp, otpKey, otpExpiry)
+                    // Store OTP in Redis
+                    await redis.set(otpKey, otp.toString(), "EX", otpExpiry);
 
+                    // Call external service to send email
+                    const emailPayload = {
+                        userId: userId,
+                        event: "otp_login",
+                        "eventType": ["email"],
+                        otp, // Send OTP in payload
+                    };
+
+                    try {
+                        const response = await axios.post(' https://32e5-202-149-218-18.ngrok-free.app/send-notification', emailPayload, {
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        console.log("✅ OTP sent successfully:", response.data);
+
+                        return {
+                            success: false,
+                            message: "OTP sent to your email. Please verify to continue.",
+                            result: {
+                                accessToken: "",
+                                refreshToken: ""
+                            }
+                        };
+                    } catch (error) {
+                        console.error("❌ Error sending OTP:", error);
+                        throw APIError.internal("Failed to send OTP");
+                    }
+                }
                 return {
                     success: true,
                     message: "Login successful",
@@ -296,7 +335,7 @@ export const AuthService = {
 
             // Update account with MPIN and device info
             await prisma.account.update({
-                where: { id: user.account_id },
+                where: { id: user.account_id ?? undefined },
                 data: {
                     mpin,
                     device_id: deviceId,
@@ -377,7 +416,7 @@ export const AuthService = {
             };
 
             // Send email using your external service
-            const response = await axios.post('https://4cb8-202-149-218-18.ngrok-free.app/send-notification', emailPayload, {
+            const response = await axios.post(' https://32e5-202-149-218-18.ngrok-free.app/send-notification', emailPayload, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -409,7 +448,7 @@ export const AuthService = {
             }
 
             const user = await prisma.users.findUnique({
-                where: { id: enrollmentRecord.user_id },
+                where: { id: enrollmentRecord.user_id ?? undefined },
             });
 
             if (!user) {
@@ -421,7 +460,7 @@ export const AuthService = {
             const hashedPassword = await bcrypt.hash(newPassword, 10);
 
             await prisma.account.update({
-                where: { id: user.account_id },
+                where: { id: user.account_id ?? undefined },
                 data: { password: hashedPassword },
             });
 
@@ -434,8 +473,83 @@ export const AuthService = {
             console.error("Error resetting password:", error);
             throw APIError.permissionDenied("Invalid or expired reset link");
         }
-    }
+    },
 
+    verifyOtp: async (username: string, otp: number): Promise<{ success: boolean; message: string }> => {
+        try {
+            if (!username || !otp) {
+                throw APIError.invalidArgument("Username and OTP are required");
+            }
+    
+            const otpKey = `otp:${username}`;
+            const storedOtp = await redis.get(otpKey);
+    
+            if (!storedOtp) {
+                throw APIError.permissionDenied("OTP expired or not found");
+            }
+    
+            if (storedOtp !== otp.toString()) {
+                throw APIError.permissionDenied("Invalid OTP");
+            }
+    
+            await redis.del(otpKey);
+    
+            return {
+                success: true,
+                message: "OTP verified successfully",
+            };
+        } catch (error) {
+            console.error("Error verifying OTP:", error);
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to verify OTP");
+        }
+    },
+
+    deleteUser: async (userId: number): Promise<{ success: boolean; message: string }> => {
+        try {
+            // Find the user and their associated account
+            const user = await prisma.users.findUnique({
+                where: { id: userId },
+                include: { account: true }
+            });
+
+            if (!user) {
+                throw APIError.notFound("User not found");
+            }
+
+            // Soft delete the user and their account
+            await prisma.$transaction(async (tx) => {
+                // Update user's is_deleted flag
+                await tx.users.update({
+                    where: { id: userId },
+                    data: { 
+                        is_deleted: true,
+                        updated_ts: Math.floor(Date.now() / 1000)
+                    }
+                });
+
+                // Update account's is_deleted flag if account exists
+                if (user.account_id) {
+                    await tx.account.update({
+                        where: { id: user.account_id },
+                        data: { 
+                            is_deleted: true,
+                            updated_ts: Math.floor(Date.now() / 1000)
+                        }
+                    });
+                }
+            });
+
+            return {
+                success: true,
+                message: "User deleted successfully"
+            };
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            if (error instanceof APIError) throw error;
+            throw APIError.internal("Failed to delete user");
+        }
+    }
 }
 
 async function verifyRecaptcha(recaptchaToken: string): Promise<boolean> {

@@ -23,6 +23,7 @@ model account {
   device_id         String?  @db.VarChar(255)
   created_ts        Int?     @default(dbgenerated("EXTRACT(epoch FROM now())"))
   updated_ts        Int?
+  istwofaenabled    Boolean? @default(false)
   users             users[]
 }
 
